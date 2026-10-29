@@ -64,6 +64,49 @@ console.log('🧪 Running Texas Holdem Engine Test Suite...');
   console.log('✅ Cash Game & All-In Runout tests passed!');
 }
 
+// 2b. Test Dramatic Street-by-Street All-In Runout ("跑马") with Live Equity
+{
+  const runoutTable = new PokerTableEngine('TEST_RUNOUT', {
+    mode: 'cash',
+    maxSeats: 2,
+    startingChips: 1000,
+    smallBlind: 10,
+    bigBlind: 20,
+  });
+  runoutTable.enableDramaticRunout = true;
+  runoutTable.takeSeat('p1', 'Alice', 0, 1000);
+  runoutTable.takeSeat('p2', 'Bob', 1, 1000);
+  runoutTable.startNewHand();
+
+  const first = runoutTable.getActivePlayer()!;
+  runoutTable.handlePlayerAction(first.id, 'allin');
+  const second = runoutTable.getActivePlayer()!;
+  runoutTable.handlePlayerAction(second.id, 'call');
+
+  // Should pause on preflop in allInRunout mode with hole cards revealed and equities calculated!
+  assert.equal(runoutTable.allInRunout, true, 'Should enter allInRunout mode');
+  assert.equal(runoutTable.street, 'preflop', 'Should pause on preflop first');
+  assert.equal(runoutTable.players[0].revealedCards[0], true, 'Hole cards should be revealed immediately');
+  assert(typeof runoutTable.players[0].allInEquity === 'number', 'Live allInEquity should be computed');
+
+  // Step 1 -> Flop
+  runoutTable.stepAllInRunout();
+  assert.equal(runoutTable.street, 'flop', 'First step should deal Flop');
+  assert.equal(runoutTable.communityCards.length, 3);
+
+  // Step 2 -> Turn
+  runoutTable.stepAllInRunout();
+  assert.equal(runoutTable.street, 'turn', 'Second step should deal Turn');
+  assert.equal(runoutTable.communityCards.length, 4);
+
+  // Step 3 -> River & Showdown
+  runoutTable.stepAllInRunout();
+  assert.equal(runoutTable.street, 'showdown', 'Third step should deal River and resolve Showdown');
+  assert.equal(runoutTable.communityCards.length, 5);
+  assert.equal(runoutTable.allInRunout, false, 'allInRunout should reset at showdown');
+  console.log('✅ Dramatic Street-by-Street All-In Runout & Equity tests passed!');
+}
+
 // 3. Test 5 AI Bot Styles in a Full Simulated Hand
 {
   const botTable = new PokerTableEngine('TEST_BOTS', {

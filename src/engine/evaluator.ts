@@ -413,3 +413,89 @@ export function estimateHandEquity(
 
   return wins / iterations;
 }
+
+/**
+ * Calculate live All-In Showdown Win Equity (0..100%) for all active contenders
+ * with known hole cards against the remaining deck.
+ */
+export function calculateAllInEquities(
+  contenders: Array<{ id: string; holeCards: Card[] }>,
+  communityCards: Card[]
+): Record<string, number> {
+  const result: Record<string, number> = {};
+  const valid = contenders.filter((c) => c.holeCards.length === 2);
+  if (valid.length === 0) return result;
+  if (valid.length === 1) {
+    result[valid[0].id] = 100;
+    return result;
+  }
+
+  const usedKey = new Set<string>();
+  for (const c of communityCards) usedKey.add(`${c.rank}${c.suit}`);
+  for (const p of valid) {
+    for (const c of p.holeCards) usedKey.add(`${c.rank}${c.suit}`);
+  }
+
+  const remainingDeck = createDeck().filter(
+    (c) => !usedKey.has(`${c.rank}${c.suit}`)
+  );
+  const needed = 5 - communityCards.length;
+  const winShares: Record<string, number> = {};
+  for (const p of valid) winShares[p.id] = 0;
+
+  const evaluateBoard = (board: Card[]) => {
+    let bestScore = -1;
+    let winners: string[] = [];
+    for (const p of valid) {
+      const score = evaluate7Cards([...p.holeCards, ...board]).score;
+      if (score > bestScore) {
+        bestScore = score;
+        winners = [p.id];
+      } else if (score === bestScore) {
+        winners.push(p.id);
+      }
+    }
+    const share = 1 / winners.length;
+    for (const wid of winners) {
+      winShares[wid] += share;
+    }
+  };
+
+  if (needed <= 0) {
+    evaluateBoard(communityCards.slice(0, 5));
+    for (const p of valid) {
+      result[p.id] = Math.round(winShares[p.id] * 100);
+    }
+    return result;
+  }
+
+  // Exact enumeration on the Turn (only 1 card left, ~44 possibilities)
+  if (needed === 1) {
+    for (const riverCard of remainingDeck) {
+      evaluateBoard([...communityCards, riverCard]);
+    }
+    const total = remainingDeck.length;
+    for (const p of valid) {
+      result[p.id] = Math.round((winShares[p.id] / total) * 100);
+    }
+    return result;
+  }
+
+  // Monte Carlo simulation for Preflop (5 cards needed) or Flop (2 cards needed)
+  const iterations = 360;
+  for (let iter = 0; iter < iterations; iter++) {
+    for (let i = 0; i < needed; i++) {
+      const r = i + Math.floor(Math.random() * (remainingDeck.length - i));
+      const tmp = remainingDeck[i];
+      remainingDeck[i] = remainingDeck[r];
+      remainingDeck[r] = tmp;
+    }
+    evaluateBoard([...communityCards, ...remainingDeck.slice(0, needed)]);
+  }
+
+  for (const p of valid) {
+    result[p.id] = Math.round((winShares[p.id] / iterations) * 100);
+  }
+  return result;
+}
+

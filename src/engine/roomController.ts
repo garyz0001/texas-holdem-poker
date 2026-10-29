@@ -12,12 +12,14 @@ export class PokerRoomController {
   public engine: PokerTableEngine;
   private clients: Map<string, ConnectedClient> = new Map();
   private botTimer: ReturnType<typeof setTimeout> | null = null;
+  private runoutTimer: ReturnType<typeof setTimeout> | null = null;
   private autoNextHandTimer: ReturnType<typeof setTimeout> | null = null;
   private tickInterval: ReturnType<typeof setInterval> | null = null;
   private onStatePersist?: () => void;
 
   constructor(roomId: string, onStatePersist?: () => void) {
     this.engine = new PokerTableEngine(roomId);
+    this.engine.enableDramaticRunout = true;
     this.onStatePersist = onStatePersist;
     this.startTicker();
   }
@@ -96,7 +98,8 @@ export class PokerRoomController {
           msg.seat,
           msg.style,
           msg.strength,
-          msg.name
+          msg.name,
+          msg.hidePrefix
         );
         if (err) return sendError(err);
         this.broadcastState();
@@ -230,6 +233,10 @@ export class PokerRoomController {
       clearTimeout(this.botTimer);
       this.botTimer = null;
     }
+    if (this.runoutTimer) {
+      clearTimeout(this.runoutTimer);
+      this.runoutTimer = null;
+    }
     if (this.autoNextHandTimer) {
       clearTimeout(this.autoNextHandTimer);
       this.autoNextHandTimer = null;
@@ -240,6 +247,34 @@ export class PokerRoomController {
     if (this.botTimer) {
       clearTimeout(this.botTimer);
       this.botTimer = null;
+    }
+    if (this.runoutTimer) {
+      clearTimeout(this.runoutTimer);
+      this.runoutTimer = null;
+    }
+
+    // 0. Check if we are in dramatic All-In Runout ("跑马") mode!
+    if (
+      this.engine.allInRunout &&
+      this.engine.street !== 'waiting' &&
+      this.engine.street !== 'showdown'
+    ) {
+      // Suspenseful delay: 1.8s before Flop, 2.1s before Turn, 2.4s before River
+      const runoutDelay =
+        this.engine.street === 'preflop'
+          ? 1800
+          : this.engine.street === 'flop'
+          ? 2100
+          : 2400;
+
+      this.runoutTimer = setTimeout(() => {
+        this.runoutTimer = null;
+        if (this.engine.stepAllInRunout()) {
+          this.broadcastState();
+          this.scheduleNextEvents();
+        }
+      }, runoutDelay);
+      return;
     }
 
     // 1. Check if active player is a Bot

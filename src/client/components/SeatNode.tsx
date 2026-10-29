@@ -126,7 +126,7 @@ export const SeatNode: React.FC<SeatNodeProps> = ({
   }
 
   const botMeta =
-    player.isBot && player.botStyle
+    player.isBot && player.botStyle && !player.hideBotStyle
       ? BOT_STYLE_METADATA[player.botStyle]
       : null;
 
@@ -196,6 +196,19 @@ export const SeatNode: React.FC<SeatNodeProps> = ({
         </div>
       )}
 
+      {/* Live All-In Runout Equity % Badge ("跑马胜率") */}
+      {!winnerInfo && player.allInEquity !== undefined && !player.folded && (
+        <div
+          className={`mb-0.5 px-2 py-0.5 rounded-full font-black text-[10px] sm:text-xs shadow-lg z-30 whitespace-nowrap border ${
+            player.allInEquity >= 50
+              ? 'bg-emerald-500 text-slate-950 border-emerald-200 shadow-[0_0_14px_rgba(16,185,129,0.8)]'
+              : 'bg-rose-600/95 text-white border-rose-300/60'
+          }`}
+        >
+          🔥 胜率 {player.allInEquity}%
+        </div>
+      )}
+
       {/* Hole Cards above / overlapping the player pod */}
       {hasCards && (
         <div
@@ -230,8 +243,8 @@ export const SeatNode: React.FC<SeatNodeProps> = ({
       <div
         className={`relative ${
           isMe
-            ? 'w-30 sm:w-40 p-1.5 sm:p-2'
-            : 'w-[92px] sm:w-38 p-1.5 sm:p-2'
+            ? 'w-28 sm:w-40 py-1 px-1.5 sm:p-2'
+            : 'w-[86px] sm:w-38 py-1 px-1.5 sm:p-2'
         } rounded-xl sm:rounded-2xl backdrop-blur-md transition-all duration-200 ${
           isActiveTurn
             ? 'bg-slate-900/95 border-2 border-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.65)] scale-105'

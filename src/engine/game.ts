@@ -18,7 +18,12 @@ import {
   TableConfig,
 } from '../shared/types';
 import { decideBotAction } from './bot';
-import { createDeck, evaluate7Cards, shuffleDeck } from './evaluator';
+import {
+  calculateAllInEquities,
+  createDeck,
+  evaluate7Cards,
+  shuffleDeck,
+} from './evaluator';
 
 export class PokerTableEngine {
   public roomId: string;
@@ -36,6 +41,8 @@ export class PokerTableEngine {
   public communityCards: Card[] = [];
   public rabbitCards: Card[] = [];
   public rabbitHuntRevealed: boolean = false;
+  public allInRunout: boolean = false;
+  public enableDramaticRunout: boolean = false;
 
   public pot: number = 0;
   public sidePots: SidePot[] = [];
@@ -294,7 +301,8 @@ export class PokerTableEngine {
     seat: number,
     style: BotStyle,
     strength: BotStrength,
-    customName?: string
+    customName?: string,
+    hidePrefix?: boolean
   ): string | null {
     if (requesterId !== this.hostId) {
       return '只有房主可以添加人机';
@@ -311,11 +319,25 @@ export class PokerTableEngine {
 
     const meta = BOT_STYLE_METADATA[style];
     const usedNames = new Set(this.players.map((p) => p.name));
-    const candidateNames = meta.defaultNames.filter((n) => !usedNames.has(n));
-    const botName =
-      customName?.trim() ||
-      candidateNames[0] ||
-      `${meta.shortTag}#${seat + 1}`;
+
+    const formatCandidate = (rawName: string) => {
+      if (hidePrefix) {
+        const parts = rawName.split('·');
+        return parts[parts.length - 1].trim();
+      }
+      return `${meta.avatar} ${rawName}`;
+    };
+
+    const candidateNames = meta.defaultNames
+      .map(formatCandidate)
+      .filter((n) => !usedNames.has(n));
+
+    const finalDisplayName = customName?.trim()
+      ? hidePrefix
+        ? customName.trim().split('·').pop()!.trim()
+        : `${meta.avatar} ${customName.trim()}`
+      : candidateNames[0] ||
+        (hidePrefix ? `AI#${seat + 1}` : `${meta.avatar} ${meta.shortTag}#${seat + 1}`);
 
     const botId = `bot_${seat}_${Date.now().toString(36)}`;
     const chips = this.config.startingChips;
@@ -323,7 +345,7 @@ export class PokerTableEngine {
 
     const botPlayer: PlayerState = {
       id: botId,
-      name: `${meta.avatar} ${botName}`,
+      name: finalDisplayName,
       seat,
       chips,
       currentBet: 0,
@@ -337,6 +359,7 @@ export class PokerTableEngine {
       isBot: true,
       botStyle: style,
       botStrength: strength,
+      hideBotStyle: !!hidePrefix,
     };
 
     this.players.push(botPlayer);
@@ -358,7 +381,9 @@ export class PokerTableEngine {
     };
 
     this.addLog(
-      `🤖 添加了人机 [${botPlayer.name}] (${meta.name}) 到 #${seat + 1} 号位`
+      hidePrefix
+        ? `🤖 添加了人机 [${botPlayer.name}] 到 #${seat + 1} 号位`
+        : `🤖 添加了人机 [${botPlayer.name}] (${meta.name}) 到 #${seat + 1} 号位`
     );
     return null;
   }
@@ -534,6 +559,7 @@ export class PokerTableEngine {
     this.communityCards = [];
     this.rabbitCards = [];
     this.rabbitHuntRevealed = false;
+    this.allInRunout = false;
     this.winners = [];
     this.pot = 0;
     this.sidePots = [];
@@ -549,6 +575,7 @@ export class PokerTableEngine {
       p.holeCards = [];
       p.revealedCards = [false, false];
       p.allIn = false;
+      p.allInEquity = undefined;
       p.lastAction = undefined;
       if (p.chips > 0 && !p.sittingOut) {
         p.folded = false;
@@ -619,7 +646,11 @@ export class PokerTableEngine {
     // Pre-flop first actor: seat after Big Blind (in Heads-Up, that's Small Blind / Dealer!)
     const firstActorSeat = this.getNextSeatInSet(this.bigBlindSeat, this.seatsToAct);
     if (firstActorSeat === null || this.canSkipStraightToShowdown()) {
-      this.advanceStreet();
+      if (this.enableDramaticRunout) {
+        this.enterAllInRunout();
+      } else {
+        this.advanceStreet();
+      }
     } else {
       this.setActiveSeat(firstActorSeat);
     }
@@ -822,18 +853,73 @@ export class PokerTableEngine {
     }
 
     // Check if current betting round is complete
-    if (this.seatsToAct.size === 0) {
-      this.advanceStreet();
-    } else {
-      const nextSeat = this.getNextSeatInSet(player.seat, this.seatsToAct);
-      if (nextSeat === null) {
-        this.advanceStreet();
+    const nextSeat =
+      this.seatsToAct.size > 0
+        ? this.getNextSeatInSet(player.seat, this.seatsToAct)
+        : null;
+
+    if (nextSeat === null) {
+      if (
+        this.enableDramaticRunout &&
+        this.canSkipStraightToShowdown() &&
+        this.street !== 'river'
+      ) {
+        this.enterAllInRunout();
       } else {
-        this.setActiveSeat(nextSeat);
+        this.advanceStreet();
       }
+    } else {
+      this.setActiveSeat(nextSeat);
     }
 
     return null;
+  }
+
+  /**
+   * Enter dramatic All-In runout mode: reveal all active contenders' hole cards
+   * and compute live win equity before dealing remaining streets one by one.
+   */
+  private enterAllInRunout() {
+    this.allInRunout = true;
+    this.activeSeat = null;
+    this.turnDeadline = null;
+    this.seatsToAct.clear();
+
+    for (const p of this.players) {
+      p.currentBet = 0;
+      if (!p.folded && p.holeCards.length === 2) {
+        p.revealedCards = [true, true];
+      }
+    }
+    this.currentHighestBet = 0;
+
+    const contenders = this.players.filter((p) => !p.folded);
+    const handsSummary = contenders
+      .map((p) => `${p.name}[${p.holeCards.map(formatCard).join('')}]`)
+      .join(' vs ');
+    this.addLog(`🔥 全下跑马亮牌：${handsSummary}！即将依次发出公共牌...`);
+    this.updateAllInEquities();
+  }
+
+  private updateAllInEquities() {
+    const contenders = this.players.filter(
+      (p) => !p.folded && p.holeCards.length === 2
+    );
+    const equities = calculateAllInEquities(contenders, this.communityCards);
+    for (const p of this.players) {
+      p.allInEquity = !p.folded ? equities[p.id] : undefined;
+    }
+  }
+
+  /**
+   * Called by PokerRoomController timer to deal the next street during an All-In runout
+   */
+  public stepAllInRunout(): boolean {
+    if (!this.allInRunout || this.street === 'showdown' || this.street === 'waiting') {
+      return false;
+    }
+    this.advanceStreet();
+    return true;
   }
 
   private recordVpip(playerId: string) {
@@ -911,6 +997,18 @@ export class PokerTableEngine {
     const playersAbleToBet = this.players.filter((p) => !p.folded && !p.allIn);
     if (playersAbleToBet.length <= 1) {
       this.seatsToAct.clear();
+      if (this.enableDramaticRunout) {
+        this.allInRunout = true;
+        this.activeSeat = null;
+        this.turnDeadline = null;
+        if (this.street === 'river') {
+          // River was just dealt during All-In runout -> resolve winners immediately!
+          this.resolveShowdown();
+        } else {
+          this.updateAllInEquities();
+        }
+        return;
+      }
       this.advanceStreet();
       return;
     }
@@ -968,9 +1066,14 @@ export class PokerTableEngine {
    */
   private resolveShowdown() {
     this.street = 'showdown';
+    this.allInRunout = false;
     this.activeSeat = null;
     this.turnDeadline = null;
     this.seatsToAct.clear();
+
+    for (const p of this.players) {
+      p.allInEquity = undefined;
+    }
 
     this.updateSidePots();
 
@@ -1345,6 +1448,7 @@ export class PokerTableEngine {
       communityCards: [...this.communityCards],
       rabbitCards: this.rabbitHuntRevealed ? [...this.rabbitCards] : [],
       rabbitHuntRevealed: this.rabbitHuntRevealed,
+      allInRunout: this.allInRunout,
       pot: this.pot,
       sidePots: [...this.sidePots],
       currentHighestBet: this.currentHighestBet,

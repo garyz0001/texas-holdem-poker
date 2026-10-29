@@ -221,6 +221,9 @@ export const App: React.FC = () => {
   // WebSocket reference
   const wsRef = useRef<WebSocket | null>(null);
   const prevStreetRef = useRef<string>('waiting');
+  const prevHandNumberRef = useRef<number>(0);
+  const prevBoardCountRef = useRef<number>(0);
+  const prevAllInRunoutRef = useRef<boolean>(false);
   const prevActiveSeatRef = useRef<number | null>(null);
   const logEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -308,7 +311,31 @@ export const App: React.FC = () => {
     if (!gameState) return;
     const myPlayer = gameState.players.find((p) => p.id === playerId);
 
-    // Street change sound
+    // 1. New Hand Dealt -> Play 4-card dealing cascade!
+    if (
+      gameState.handNumber > 0 &&
+      gameState.handNumber !== prevHandNumberRef.current
+    ) {
+      sound.playCardDeal(4, 0.085);
+      prevHandNumberRef.current = gameState.handNumber;
+      prevBoardCountRef.current = 0;
+    }
+
+    // 2. Community Cards Dealt (Flop = 3 cards, Turn = 1 card, River = 1 card)
+    const newBoardLen = gameState.communityCards.length;
+    if (newBoardLen > prevBoardCountRef.current) {
+      const added = newBoardLen - prevBoardCountRef.current;
+      sound.playCardDeal(added >= 3 ? 3 : 1, 0.11);
+    }
+    prevBoardCountRef.current = newBoardLen;
+
+    // 3. All-In Runout ("跑马") Triggered -> Play dramatic suspense heartbeat!
+    if (gameState.allInRunout && !prevAllInRunoutRef.current) {
+      sound.playAllInSuspense();
+    }
+    prevAllInRunoutRef.current = gameState.allInRunout;
+
+    // 4. Showdown win sound & confetti
     if (gameState.street !== prevStreetRef.current) {
       if (gameState.street === 'showdown') {
         sound.playWin();
@@ -320,19 +347,18 @@ export const App: React.FC = () => {
             origin: { y: 0.6 },
           });
         }
-      } else if (gameState.street !== 'waiting') {
-        sound.playChip();
       }
       prevStreetRef.current = gameState.street;
     }
 
-    // Active turn alert sound when it becomes MY turn
+    // 5. Active turn alert sound when it becomes MY turn
     if (
       gameState.activeSeat !== prevActiveSeatRef.current &&
       myPlayer &&
       gameState.activeSeat === myPlayer.seat &&
       gameState.street !== 'waiting' &&
-      gameState.street !== 'showdown'
+      gameState.street !== 'showdown' &&
+      !gameState.allInRunout
     ) {
       sound.playTurnAlert();
     }
@@ -558,7 +584,7 @@ export const App: React.FC = () => {
     gameState.actionLog[gameState.actionLog.length - 1] || '等待发牌...';
 
   return (
-    <div className="min-h-screen flex flex-col justify-between bg-slate-950 text-slate-100 select-none overflow-x-hidden">
+    <div className="h-[100dvh] max-h-[100dvh] w-full flex flex-col justify-between bg-slate-950 text-slate-100 select-none overflow-hidden">
       {/* Error Toast Notification */}
       {errorToast && (
         <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl bg-rose-600 text-white font-bold text-xs shadow-2xl border border-rose-400 animate-bounce">
@@ -567,29 +593,29 @@ export const App: React.FC = () => {
       )}
 
       {/* ====================================================================
-          TOP NAVIGATION & STATUS BAR
+          TOP NAVIGATION & STATUS BAR (Compact single row on mobile)
       ==================================================================== */}
-      <header className="w-full px-2.5 sm:px-6 py-2 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-1.5 sm:gap-2 z-30">
+      <header className="shrink-0 w-full px-2 sm:px-6 py-1.5 sm:py-2 bg-slate-900/90 border-b border-slate-800 flex items-center justify-between gap-1 z-30">
         {/* Left: Room Code, Copy Invite, Mode & Blinds */}
-        <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-          <div className="flex items-center gap-1 px-2 py-1 rounded-xl bg-slate-950 border border-slate-800">
-            <span className="text-xs sm:text-sm font-black font-mono text-emerald-400">
+        <div className="flex items-center gap-1 sm:gap-2 min-w-0">
+          <div className="flex items-center gap-1 px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-xl bg-slate-950 border border-slate-800 shrink-0">
+            <span className="text-[11px] sm:text-sm font-black font-mono text-emerald-400">
               #{gameState.roomId}
             </span>
             <button
               onClick={handleCopyInviteLink}
-              className="px-1.5 py-0.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 text-[11px] sm:text-xs font-semibold flex items-center gap-0.5 cursor-pointer transition"
+              className="px-1.5 py-0.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 text-[10px] sm:text-xs font-semibold flex items-center gap-0.5 cursor-pointer transition"
               title="复制房间链接发给好友即可直接联机"
             >
               {copiedLink ? (
                 <>
-                  <Check className="w-3 h-3" />
-                  已复制
+                  <Check className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                  <span>已复制</span>
                 </>
               ) : (
                 <>
-                  <Copy className="w-3 h-3" />
-                  邀请
+                  <Copy className="w-2.5 h-2.5 sm:w-3 sm:h-3" />
+                  <span>邀请</span>
                 </>
               )}
             </button>
@@ -597,7 +623,7 @@ export const App: React.FC = () => {
 
           {/* Mode & Blinds Pill */}
           <div
-            className={`px-2 sm:px-3 py-1 rounded-xl text-[11px] sm:text-xs font-bold border flex items-center gap-1.5 ${
+            className={`px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-xl text-[10px] sm:text-xs font-bold border flex items-center gap-1 truncate ${
               gameState.config.mode === 'sng'
                 ? 'bg-sky-950/70 border-sky-500/40 text-sky-300'
                 : 'bg-emerald-950/70 border-emerald-500/40 text-emerald-300'
@@ -605,8 +631,8 @@ export const App: React.FC = () => {
           >
             <span>
               {gameState.config.mode === 'sng'
-                ? `🏆 SNG Lv.${currentSngLevel?.level || 1}`
-                : '💵 常规'}
+                ? `🏆Lv.${currentSngLevel?.level || 1}`
+                : '💵常规'}
             </span>
             <span className="text-slate-500">|</span>
             <span>
@@ -617,11 +643,11 @@ export const App: React.FC = () => {
         </div>
 
         {/* Right: Utility & Host Buttons */}
-        <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap">
+        <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           {/* Toggle Chips vs BB Display */}
           <button
             onClick={() => setShowStackInBB((v) => !v)}
-            className={`px-2 py-1 sm:py-1.5 rounded-xl text-[11px] sm:text-xs font-bold border flex items-center gap-1 cursor-pointer transition ${
+            className={`px-1.5 sm:px-2 py-1 rounded-xl text-[10px] sm:text-xs font-bold border flex items-center gap-0.5 cursor-pointer transition ${
               showStackInBB
                 ? 'bg-amber-500/20 border-amber-400 text-amber-300'
                 : 'bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700'
@@ -632,22 +658,20 @@ export const App: React.FC = () => {
             <span>{showStackInBB ? 'BB' : '筹码'}</span>
           </button>
 
-          {/* Toggle 4-color deck (desktop label, icon on mobile) */}
+          {/* Toggle 4-color deck (desktop only to keep mobile header 1-line) */}
           <button
             onClick={() => setFourColorDeck((v) => !v)}
-            className="px-2 py-1 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-[11px] sm:text-xs font-semibold flex items-center gap-1 cursor-pointer transition"
+            className="hidden sm:flex px-2 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold items-center gap-1 cursor-pointer transition"
             title="切换四色扑克牌 / 传统双色扑克牌"
           >
-            <Layers className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-            <span className="hidden sm:inline">
-              {fourColorDeck ? '四色牌' : '双色牌'}
-            </span>
+            <Layers className="w-3.5 h-3.5" />
+            <span>{fourColorDeck ? '四色牌' : '双色牌'}</span>
           </button>
 
           {/* Sound Toggle */}
           <button
             onClick={() => setSoundEnabled(sound.toggle())}
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition"
+            className="p-1 sm:p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 cursor-pointer transition"
             title="开关音效"
           >
             {soundEnabled ? (
@@ -660,7 +684,7 @@ export const App: React.FC = () => {
           {/* Ledger Modal Button */}
           <button
             onClick={() => setLedgerOpen(true)}
-            className="px-2 py-1 sm:py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[11px] sm:text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+            className="px-1.5 sm:px-2 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[10px] sm:text-xs font-bold flex items-center gap-0.5 cursor-pointer transition"
           >
             <Receipt className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
             <span>战绩</span>
@@ -670,10 +694,10 @@ export const App: React.FC = () => {
           {isHost && emptySeats.length > 0 && canModifySeats && (
             <button
               onClick={() => setAddBotSeat(emptySeats[0])}
-              className="px-2 py-1 sm:py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] sm:text-xs font-bold flex items-center gap-1 cursor-pointer shadow transition"
+              className="px-1.5 sm:px-2 py-1 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] sm:text-xs font-bold flex items-center gap-0.5 cursor-pointer shadow transition"
             >
               <Bot className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span>+人机</span>
+              <span>+AI</span>
             </button>
           )}
 
@@ -681,10 +705,11 @@ export const App: React.FC = () => {
           {isHost && (
             <button
               onClick={() => setSettingsOpen(true)}
-              className="px-2 py-1 sm:py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-[11px] sm:text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+              className="p-1 sm:px-2 sm:py-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 text-white text-[10px] sm:text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+              title="牌桌设置"
             >
-              <Settings className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400" />
-              <span className="hidden xs:inline">设置</span>
+              <Settings className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden sm:inline">设置</span>
             </button>
           )}
 
@@ -695,7 +720,7 @@ export const App: React.FC = () => {
               setInRoom(false);
               setGameState(null);
             }}
-            className="p-1.5 rounded-xl bg-slate-800 hover:bg-rose-950 border border-slate-700 text-slate-400 hover:text-rose-300 cursor-pointer transition"
+            className="p-1 sm:p-1.5 rounded-xl bg-slate-800 hover:bg-rose-950 border border-slate-700 text-slate-400 hover:text-rose-300 cursor-pointer transition"
             title="返回大厅"
           >
             <LogOut className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -704,17 +729,17 @@ export const App: React.FC = () => {
       </header>
 
       {/* ====================================================================
-          CENTER POKER TABLE ARENA
+          CENTER POKER TABLE ARENA (Flex-1 adaptive height, no page scroll!)
           - Vertical Stadium on Mobile (< 640px)
           - Horizontal Oval on Desktop (>= 640px)
       ==================================================================== */}
-      <main className="relative flex-1 flex items-center justify-center py-10 sm:py-12 px-2 sm:px-12 overflow-hidden">
-        {/* Outer Table Container: Vertical on Mobile, Horizontal on Desktop */}
+      <main className="relative flex-1 min-h-0 w-full flex items-center justify-center py-7 sm:py-10 px-2 sm:px-12 overflow-hidden">
+        {/* Outer Table Container: Adaptive Vertical on Mobile, Horizontal on Desktop */}
         <div
           className={
             isMobile
-              ? 'relative w-[76%] max-w-[300px] h-[460px] my-4'
-              : 'relative w-full max-w-4xl aspect-[16/9] max-h-[500px] min-h-[360px]'
+              ? 'relative w-[74%] max-w-[290px] h-full max-h-[450px] min-h-[200px]'
+              : 'relative w-full max-w-4xl h-full max-h-[460px] min-h-[280px] aspect-[16/9]'
           }
         >
           {/* Wooden / Leather Rail */}
@@ -775,7 +800,13 @@ export const App: React.FC = () => {
               )}
 
               {/* Center Table Action Prompts (Start Hand / Next Hand / Quick Bot Fill / SNG Champion) */}
-              <div className="z-20 mt-1.5 sm:mt-2 flex flex-wrap items-center justify-center gap-1.5 px-2">
+              <div className="z-20 mt-1 sm:mt-2 flex flex-wrap items-center justify-center gap-1.5 px-2">
+                {gameState.allInRunout && (
+                  <div className="px-3 py-1 rounded-full bg-gradient-to-r from-rose-600 via-amber-500 to-rose-600 text-white font-black text-[11px] sm:text-xs shadow-[0_0_20px_rgba(244,63,94,0.8)] animate-pulse">
+                    🔥 ALL-IN 跑马逐街开牌中...
+                  </div>
+                )}
+
                 {gameState.sngFinished && (
                   <div className="flex flex-col items-center gap-1.5 bg-slate-950/95 px-3 sm:px-5 py-2 sm:py-3 rounded-2xl border-2 border-amber-400 shadow-2xl text-center">
                     <div className="text-amber-300 font-black text-xs sm:text-base">
@@ -936,7 +967,7 @@ export const App: React.FC = () => {
       {/* ====================================================================
           BOTTOM PLAYER CONTROLS & COLLAPSIBLE LOG/CHAT PANEL
       ==================================================================== */}
-      <footer className="w-full px-2 sm:px-6 pb-2 sm:pb-3 pt-1 space-y-1.5 sm:space-y-2 z-30">
+      <footer className="shrink-0 relative w-full px-2 sm:px-6 pb-1.5 sm:pb-2.5 pt-0.5 space-y-1 sm:space-y-1.5 z-30">
         <ActionControls
           state={gameState}
           myPlayer={myPlayer}
@@ -960,71 +991,12 @@ export const App: React.FC = () => {
           }
         />
 
-        {/* Action Log & Chat Box (Collapsible on Mobile to save vertical space) */}
-        <div className="w-full max-w-5xl mx-auto rounded-xl bg-slate-900/85 border border-slate-800/90 overflow-hidden backdrop-blur-md">
-          <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950/70 border-b border-slate-800/80 text-xs">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={() => {
-                  setActiveBottomTab('log');
-                  setMobileDrawerOpen(true);
-                }}
-                className={`flex items-center gap-1 font-bold py-0.5 cursor-pointer transition ${
-                  activeBottomTab === 'log'
-                    ? 'text-emerald-400 border-b-2 border-emerald-400'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <ScrollText className="w-3.5 h-3.5" />
-                <span>播报</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveBottomTab('chat');
-                  setMobileDrawerOpen(true);
-                }}
-                className={`flex items-center gap-1 font-bold py-0.5 cursor-pointer transition ${
-                  activeBottomTab === 'chat'
-                    ? 'text-amber-400 border-b-2 border-amber-400'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <MessageSquare className="w-3.5 h-3.5" />
-                <span>聊天 ({gameState.chatMessages.length})</span>
-              </button>
-            </div>
-
-            {/* Latest log ticker when collapsed on mobile */}
-            {isMobile && !mobileDrawerOpen && (
-              <div
-                onClick={() => setMobileDrawerOpen(true)}
-                className="flex-1 mx-2 truncate text-[11px] text-slate-400 font-mono text-right cursor-pointer"
-              >
-                {latestLogLine}
-              </div>
-            )}
-
-            <button
-              onClick={() => setMobileDrawerOpen((v) => !v)}
-              className="sm:hidden p-1 text-slate-400 hover:text-white cursor-pointer"
-              title="展开/收起记录面板"
-            >
-              {mobileDrawerOpen ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronUp className="w-4 h-4" />
-              )}
-            </button>
-
-            <span className="text-[11px] text-slate-500 hidden sm:inline">
-              {isHost ? '👑 您是房主，可随时配置规则或添加 AI 人机' : '联机房间已加密同步'}
-            </span>
-          </div>
-
-          {(!isMobile || mobileDrawerOpen) && (
-            <>
+        {/* Action Log & Chat Box (Floating overlay when expanded so it never pushes viewport height!) */}
+        <div className="relative w-full max-w-5xl mx-auto rounded-xl bg-slate-900/90 border border-slate-800/90 backdrop-blur-md">
+          {mobileDrawerOpen && (
+            <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl bg-slate-900/95 border border-slate-700 shadow-2xl overflow-hidden z-40 backdrop-blur-xl">
               {activeBottomTab === 'log' ? (
-                <div className="h-20 sm:h-24 overflow-y-auto px-3 py-1.5 space-y-1 font-mono text-[11px] sm:text-xs text-slate-300">
+                <div className="h-32 overflow-y-auto px-3 py-2 space-y-1 font-mono text-[11px] sm:text-xs text-slate-300">
                   {gameState.actionLog.map((line, i) => (
                     <div key={i} className="leading-relaxed">
                       {line}
@@ -1033,8 +1005,8 @@ export const App: React.FC = () => {
                   <div ref={logEndRef} />
                 </div>
               ) : (
-                <div className="p-2 flex flex-col gap-1.5">
-                  <div className="h-16 overflow-y-auto px-2 space-y-1 text-xs">
+                <div className="p-2.5 flex flex-col gap-2">
+                  <div className="h-24 overflow-y-auto px-2 space-y-1 text-xs">
                     {gameState.chatMessages.length === 0 ? (
                       <div className="text-slate-500 py-2">
                         暂无聊天消息，发个表情或打个招呼吧~
@@ -1082,8 +1054,71 @@ export const App: React.FC = () => {
                   </form>
                 </div>
               )}
-            </>
+            </div>
           )}
+
+          {/* Compact Single-Line Ticker & Tab Bar */}
+          <div className="flex items-center justify-between px-2.5 py-1 bg-slate-950/80 rounded-xl text-[11px] sm:text-xs">
+            <div className="flex items-center gap-2.5 shrink-0">
+              <button
+                onClick={() => {
+                  if (activeBottomTab === 'log' && mobileDrawerOpen) {
+                    setMobileDrawerOpen(false);
+                  } else {
+                    setActiveBottomTab('log');
+                    setMobileDrawerOpen(true);
+                  }
+                }}
+                className={`flex items-center gap-1 font-bold cursor-pointer transition ${
+                  activeBottomTab === 'log' && mobileDrawerOpen
+                    ? 'text-emerald-400'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <ScrollText className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span>播报</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (activeBottomTab === 'chat' && mobileDrawerOpen) {
+                    setMobileDrawerOpen(false);
+                  } else {
+                    setActiveBottomTab('chat');
+                    setMobileDrawerOpen(true);
+                  }
+                }}
+                className={`flex items-center gap-1 font-bold cursor-pointer transition ${
+                  activeBottomTab === 'chat' && mobileDrawerOpen
+                    ? 'text-amber-400'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <MessageSquare className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span>聊天({gameState.chatMessages.length})</span>
+              </button>
+            </div>
+
+            {/* Latest log ticker in the middle */}
+            <div
+              onClick={() => setMobileDrawerOpen((v) => !v)}
+              className="flex-1 mx-2 truncate text-[11px] text-slate-300 font-mono text-right cursor-pointer"
+              title="点击展开/收起牌局记录"
+            >
+              {latestLogLine}
+            </div>
+
+            <button
+              onClick={() => setMobileDrawerOpen((v) => !v)}
+              className="p-0.5 text-slate-400 hover:text-white cursor-pointer shrink-0"
+              title="展开/收起记录面板"
+            >
+              {mobileDrawerOpen ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronUp className="w-3.5 h-3.5" />
+              )}
+            </button>
+          </div>
         </div>
       </footer>
 
@@ -1104,8 +1139,21 @@ export const App: React.FC = () => {
         targetSeat={addBotSeat}
         emptySeats={emptySeats}
         onClose={() => setAddBotSeat(null)}
-        onAddBot={(seat: number, style: BotStyle, strength: BotStrength, name?: string) =>
-          sendMessage({ type: 'ADD_BOT', seat, style, strength, name })
+        onAddBot={(
+          seat: number,
+          style: BotStyle,
+          strength: BotStrength,
+          name?: string,
+          hidePrefix?: boolean
+        ) =>
+          sendMessage({
+            type: 'ADD_BOT',
+            seat,
+            style,
+            strength,
+            name,
+            hidePrefix,
+          })
         }
       />
 

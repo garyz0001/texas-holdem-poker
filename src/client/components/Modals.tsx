@@ -437,7 +437,13 @@ interface AddBotModalProps {
   targetSeat: number | null;
   emptySeats: number[];
   onClose: () => void;
-  onAddBot: (seat: number, style: BotStyle, strength: BotStrength, name?: string) => void;
+  onAddBot: (
+    seat: number,
+    style: BotStyle,
+    strength: BotStrength,
+    name?: string,
+    hidePrefix?: boolean
+  ) => void;
 }
 
 export const AddBotModal: React.FC<AddBotModalProps> = ({
@@ -450,6 +456,7 @@ export const AddBotModal: React.FC<AddBotModalProps> = ({
   const [selectedStyle, setSelectedStyle] = useState<BotStyle>('TAG');
   const [selectedStrength, setSelectedStrength] = useState<BotStrength>('shark');
   const [customName, setCustomName] = useState<string>('');
+  const [hidePrefix, setHidePrefix] = useState<boolean>(true);
 
   if (!isOpen || targetSeat === null) return null;
 
@@ -466,7 +473,7 @@ export const AddBotModal: React.FC<AddBotModalProps> = ({
     ];
     emptySeats.forEach((seat, idx) => {
       const pick = rotation[idx % rotation.length];
-      onAddBot(seat, pick.style, pick.strength);
+      onAddBot(seat, pick.style, pick.strength, undefined, hidePrefix);
     });
     onClose();
   };
@@ -567,6 +574,24 @@ export const AddBotModal: React.FC<AddBotModalProps> = ({
               className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 text-white text-sm"
             />
           </div>
+
+          {/* Hide AI Prefix Toggle */}
+          <label className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-slate-950/70 border border-slate-800 cursor-pointer hover:border-indigo-500/50 transition">
+            <div>
+              <div className="font-bold text-slate-200 text-xs sm:text-sm">
+                🕵️ 隐藏 AI 风格前缀（只保留最后代号）
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                开启后仅显示如“阿哲”、“老K”、“丹尼”等纯代号并隐藏打法标签，界面更清爽且不剧透 AI 性格
+              </div>
+            </div>
+            <input
+              type="checkbox"
+              checked={hidePrefix}
+              onChange={(e) => setHidePrefix(e.target.checked)}
+              className="w-5 h-5 accent-indigo-500 cursor-pointer shrink-0"
+            />
+          </label>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5 bg-slate-950 border-t border-slate-800">
@@ -592,7 +617,13 @@ export const AddBotModal: React.FC<AddBotModalProps> = ({
             </button>
             <button
               onClick={() => {
-                onAddBot(targetSeat, selectedStyle, selectedStrength, customName);
+                onAddBot(
+                  targetSeat,
+                  selectedStyle,
+                  selectedStrength,
+                  customName,
+                  hidePrefix
+                );
                 onClose();
               }}
               className="px-5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg cursor-pointer"

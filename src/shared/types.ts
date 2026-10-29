@@ -63,6 +63,7 @@ export interface PlayerState {
   isBot: boolean;
   botStyle?: BotStyle;
   botStrength?: BotStrength;
+  hideBotStyle?: boolean;
   lastAction?: {
     type: PlayerActionType;
     amount?: number;
@@ -70,6 +71,7 @@ export interface PlayerState {
   };
   eliminatedRank?: number; // In SNG, finishing place (e.g., 3rd, 2nd, 1st)
   pendingRebuy?: number; // Chips queued for next hand
+  allInEquity?: number; // Live win probability (0..100) during All-In runout!
 }
 
 export interface SidePot {
@@ -127,6 +129,7 @@ export interface PublicGameState {
   communityCards: Card[];
   rabbitCards: Card[]; // Remaining undealt board cards if Rabbit Hunt triggered
   rabbitHuntRevealed: boolean;
+  allInRunout: boolean; // True when players are All-In and board is running out street-by-street
   pot: number;
   sidePots: SidePot[];
   currentHighestBet: number;
@@ -150,7 +153,7 @@ export type ClientMessage =
   | { type: 'JOIN_ROOM'; name: string; playerId: string }
   | { type: 'TAKE_SEAT'; seat: number; buyIn?: number }
   | { type: 'LEAVE_SEAT' }
-  | { type: 'ADD_BOT'; seat: number; style: BotStyle; strength: BotStrength; name?: string }
+  | { type: 'ADD_BOT'; seat: number; style: BotStyle; strength: BotStrength; name?: string; hidePrefix?: boolean }
   | { type: 'REMOVE_BOT'; seat: number }
   | { type: 'UPDATE_CONFIG'; config: Partial<TableConfig> }
   | { type: 'START_GAME' }
